@@ -1,0 +1,129 @@
+name: Test/Lint/Fmt/Vet
+on:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: golang:1
+    env:
+      GOFLAGS: "-buildvcs=false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        id: build
+        continue-on-error: true
+        run: go build -o /dev/null ./...
+
+      - name: Test
+        id: test
+        continue-on-error: true
+        run: go test ./...
+
+      - name: Check gofmt changes
+        id: gofmt
+        continue-on-error: true
+        run: |
+          if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+            echo "Check local formatting with gofmt, the following files have formatting deviations:"
+            gofmt -s -l .
+            exit 1
+          fi
+
+      - name: Vet
+        id: vet
+        continue-on-error: true
+        run: go vet ./...
+
+      - name: Verify Go modules
+        id: gomod
+        continue-on-error: true
+        run: |
+          go mod download
+          go mod verify
+
+      - name: Run govulncheck
+        id: govuln
+        continue-on-error: true
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck -test ./...
+
+      - name: Run errcheck
+        id: errcheck
+        continue-on-error: true
+        run: |
+          go install github.com/kisielk/errcheck@latest
+          errcheck ./...
+
+      - name: Run staticcheck
+        id: staticcheck
+        continue-on-error: true
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./...
+
+      - name: Run golint
+        id: golint
+        continue-on-error: true
+        run: |
+          go install golang.org/x/lint/golint@latest
+          golint -set_exit_status ./...
+
+      - name: Fail job if any check failed
+        if: always()
+        run: |
+          failed=0
+
+          if [ "${{ steps.build.outcome }}" = "failure" ]; then
+            echo "Build failed"
+            failed=1
+          fi
+
+          if [ "${{ steps.test.outcome }}" = "failure" ]; then
+            echo "Tests failed"
+            failed=1
+          fi
+
+          if [ "${{ steps.gofmt.outcome }}" = "failure" ]; then
+            echo "gofmt check failed"
+            failed=1
+          fi
+
+          if [ "${{ steps.vet.outcome }}" = "failure" ]; then
+            echo "go vet failed"
+            failed=1
+          fi
+
+          if [ "${{ steps.gomod.outcome }}" = "failure" ]; then
+            echo "Go modules verification failed"
+            failed=1
+          fi
+
+          if [ "${{ steps.govuln.outcome }}" = "failure" ]; then
+            echo "govulncheck failed"
+            failed=1
+          fi
+
+          if [ "${{ steps.errcheck.outcome }}" = "failure" ]; then
+            echo "errcheck failed"
+            failed=1
+          fi
+
+          if [ "${{ steps.staticcheck.outcome }}" = "failure" ]; then
+            echo "staticcheck failed"
+            failed=1
+          fi
+
+          if [ "${{ steps.golint.outcome }}" = "failure" ]; then
+            echo "golint failed"
+            failed=1
+          fi
+
+          if [ "$failed" -ne 0 ]; then
+            echo "One or more checks failed."
+            exit 1
+          else
+            echo "All checks passed."
+          fi
